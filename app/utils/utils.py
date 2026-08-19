@@ -164,6 +164,77 @@ def font_dir(sub_dir: str = ""):
     return d
 
 
+# 仓库自带的开源字体，按可读性排序，用作找不到指定字体时的兜底。
+# STHeiti、微软雅黑等中文字体属于系统私有字体，仓库按授权要求不随代码分发
+# （见 .gitignore），因此全新克隆的仓库里默认字体一定不存在。历史实现直接
+# 拼出路径交给渲染器，结果是字幕渲染在干净环境中必然失败。
+_BUNDLED_FALLBACK_FONTS = (
+    # 用户自备的中文字体排在最前：老用户把 STHeiti、微软雅黑放进 resource/fonts
+    # 之后，不指定字体时仍应拿到带中文字形的字体，行为与历史默认值一致。
+    "STHeitiMedium.ttc",
+    "MicrosoftYaHeiBold.ttc",
+    "STHeitiLight.ttc",
+    # 以下字体随仓库分发，保证全新克隆的环境也能渲染字幕。
+    "BeVietnamPro-Bold.ttf",
+    "BeVietnamPro-Medium.ttf",
+    "Charm-Bold.ttf",
+)
+
+
+def list_available_fonts() -> list[str]:
+    """返回字体目录中实际存在的字体文件名。"""
+    directory = Path(font_dir())
+    if not directory.is_dir():
+        return []
+    return sorted(
+        entry.name
+        for entry in directory.iterdir()
+        if entry.is_file() and entry.suffix.lower() in {".ttf", ".ttc", ".otf"}
+    )
+
+
+def resolve_font_path(font_name: str | None = None) -> str:
+    """
+    解析可用的字幕字体路径，找不到指定字体时回退到仓库自带的开源字体。
+
+    用户自备的中文字体优先：只要 ``font_name`` 指向的文件存在就原样使用，
+    保持既有行为不变。仅当该文件缺失时才回退，并记录警告说明实际用了哪个
+    字体——静默换字体会让用户以为设置生效了。
+
+    字体目录彻底为空时抛出 ``FileNotFoundError``，由调用方决定是关闭字幕还是
+    中断任务；继续把不存在的路径传给渲染器只会得到难以定位的底层报错。
+    """
+    directory = Path(font_dir())
+    requested = str(font_name or "").strip()
+
+    if requested:
+        # 字体名来自配置、API 请求和 WebUI 选择框，可能夹带路径分隔符。
+        # 只取文件名，避免读取字体目录以外的文件。
+        candidate = directory / os.path.basename(requested)
+        if candidate.is_file():
+            return str(candidate)
+        logger.warning(
+            f"subtitle font not found: {candidate}. "
+            "Falling back to a font bundled with the repository."
+        )
+
+    for fallback in _BUNDLED_FALLBACK_FONTS:
+        candidate = directory / fallback
+        if candidate.is_file():
+            if requested:
+                logger.warning(f"using fallback subtitle font: {fallback}")
+            return str(candidate)
+
+    available = list_available_fonts()
+    if available:
+        return str(directory / available[0])
+
+    raise FileNotFoundError(
+        f"no usable subtitle font found in {directory}. "
+        "Add a .ttf/.ttc/.otf font there, or disable subtitles."
+    )
+
+
 def song_dir(sub_dir: str = ""):
     d = resource_dir("songs")
     if sub_dir:

@@ -999,9 +999,11 @@ def generate_video(
 
     font_path = ""
     if params.subtitle_enabled:
-        if not params.font_name:
-            params.font_name = "STHeitiMedium.ttc"
-        font_path = os.path.join(utils.font_dir(), params.font_name)
+        # 默认字体属于系统私有字体，不随仓库分发，全新环境里必然缺失。
+        # 统一交给解析器回退到仓库自带字体，并把实际使用的字体写回参数，
+        # 让任务记录反映真正生效的设置而不是请求里的值。
+        font_path = utils.resolve_font_path(params.font_name)
+        params.font_name = os.path.basename(font_path)
         if os.name == "nt":
             font_path = font_path.replace("\\", "/")
 

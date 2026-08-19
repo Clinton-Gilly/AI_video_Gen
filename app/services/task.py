@@ -13,7 +13,7 @@ from loguru import logger
 
 from app.config import config
 from app.models import const
-from app.models.schema import VideoConcatMode, VideoParams
+from app.models.schema import VideoConcatMode, VideoMode, VideoParams
 from app.services import bgm as bgm_service
 from app.services import (
     elevenlabs_music,
@@ -28,7 +28,9 @@ from app.services import (
     voice,
 )
 from app.services import upload_post
+from app.services import series as series_store
 from app.services import state as sm
+from app.services import story
 from app.utils import file_security, utils
 
 
@@ -1163,6 +1165,104 @@ def _schedule_cross_post(
 
 
 def _run_pipeline(
+    task_id,
+    params: VideoParams,
+    stop_at: str = "video",
+    voice_preview: dict | None = None,
+    loomloom_video_request: loomloom.LoomLoomConfirmedVideoRequest | None = None,
+):
+    """按生成方式分派到对应产线。"""
+    if params.mode == VideoMode.drama:
+        return _run_drama_pipeline(task_id, params, stop_at=stop_at)
+    return _run_stock_pipeline(
+        task_id,
+        params,
+        stop_at=stop_at,
+        voice_preview=voice_preview,
+        loomloom_video_request=loomloom_video_request,
+    )
+
+
+def _run_drama_pipeline(task_id, params: VideoParams, stop_at: str = "video"):
+    """
+    角色短剧产线：写出结构化剧本并入库，再逐镜生成画面。
+
+    剧本阶段不消耗画面额度，因此即使还没有配置画面后端也照常执行并落盘，
+    用户可以先审阅剧本。画面阶段所需的 provider 尚未接入，到达该阶段时给出
+    明确失败，而不是退回素材库空镜——那会让角色短剧变成另一种视频。
+    """
+    logger.info(f"start drama task: {task_id}, stop_at: {stop_at}")
+    sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=5)
+
+    if not params.series_id:
+        return _mark_task_failed(
+            task_id, "preflight", "drama mode requires series_id"
+        )
+
+    premise = (params.episode_premise or params.video_subject or "").strip()
+    if not premise:
+        return _mark_task_failed(
+            task_id,
+            "preflight",
+            "drama mode requires episode_premise or video_subject",
+        )
+
+    try:
+        series = series_store.load_series(params.series_id)
+    except series_store.SeriesStoreError as exc:
+        return _mark_task_failed(task_id, "preflight", str(exc))
+
+    try:
+        episode = series_store.continue_series(
+            series_id=params.series_id,
+            premise=premise,
+            is_finale=params.is_finale,
+        )
+    except (story.StoryGenerationError, ValueError) as exc:
+        return _mark_task_failed(task_id, "script", str(exc))
+
+    shots = episode.shots()
+    script_payload = {
+        "mode": VideoMode.drama.value,
+        "series_id": series.id,
+        "part_number": episode.part_number,
+        "title": episode.title,
+        "hook": episode.hook,
+        "cliffhanger": episode.cliffhanger,
+        "shot_count": len(shots),
+        "estimated_duration": episode.duration(),
+        "params": params.model_dump(mode="json"),
+    }
+    task_artifacts.write_script_data(task_id, script_payload)
+    sm.state.update_task(
+        task_id, state=const.TASK_STATE_PROCESSING, progress=30, **script_payload
+    )
+
+    if stop_at == "script":
+        sm.state.update_task(
+            task_id, state=const.TASK_STATE_COMPLETE, progress=100, **script_payload
+        )
+        return script_payload
+
+    # 缺定妆图的角色无法保持跨镜头一致，先于画面生成拦下比事后重跑便宜。
+    missing = series.missing_references()
+    if missing:
+        return _mark_task_failed(
+            task_id,
+            "preflight",
+            "these characters have no reference image yet, so they would look "
+            f"different in every shot: {', '.join(missing)}",
+        )
+
+    return _mark_task_failed(
+        task_id,
+        "materials",
+        f"episode {episode.part_number} written with {len(shots)} shots, but no "
+        "visual backend is configured for drama mode yet",
+    )
+
+
+def _run_stock_pipeline(
     task_id,
     params: VideoParams,
     stop_at: str = "video",

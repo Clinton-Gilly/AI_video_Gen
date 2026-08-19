@@ -152,6 +152,10 @@ class TestSubtitleBackgroundSettings(unittest.TestCase):
             / "fonts"
             / "MicrosoftYaHeiBold.ttc"
         )
+        # 微软雅黑属于系统私有字体，仓库按授权要求不分发。缺失时跳过，
+        # 而不是让干净克隆的仓库出现必然失败的用例。
+        if not font_path.is_file():
+            self.skipTest("MicrosoftYaHeiBold.ttc is not available in resource/fonts")
 
         wrapped_text, _ = video.wrap_text(
             "如果你调整字号，中文笔画也不能被黑色背景遮挡。",

@@ -25,6 +25,15 @@ from app.utils import utils
 resources_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources")
 
 
+def _find_chinese_font() -> str | None:
+    """返回字体目录中第一个带中文字形的字体，没有则返回 None。"""
+    for font_name in utils.list_available_fonts():
+        font_path = os.path.join(utils.font_dir(), font_name)
+        if vd.subtitle_font_supports_text(font_path, "中文"):
+            return font_path
+    return None
+
+
 class _FakeMoviePyClip:
     """为最终混音单测提供最小 MoviePy 接口，避免 CI 真实编码大型视频。"""
 
@@ -953,38 +962,34 @@ class TestVideoService(unittest.TestCase):
         self.assertEqual(first_a_clip, full_clip)
     
     def test_wrap_text(self):
-        """test text wrapping function"""
-        try:
-            font_path = os.path.join(utils.font_dir(), "STHeitiMedium.ttc")
-            if not os.path.exists(font_path):
-                self.fail(f"font file not found: {font_path}")
-                
-            # test english text wrapping
-            test_text_en = "This is a test text for wrapping long sentences in english language"
-            
-            wrapped_text_en, text_height_en = vd.wrap_text(
-                text=test_text_en,
-                max_width=300,
-                font=font_path,
-                fontsize=30
-            )
-            print(wrapped_text_en, text_height_en)
-            # verify text is wrapped
-            self.assertIn("\n", wrapped_text_en)
-            
-            # test chinese text wrapping
-            test_text_zh = "这是一段用来测试中文长句换行的文本内容，应该会根据宽度限制进行换行处理"
-            wrapped_text_zh, text_height_zh = vd.wrap_text(
-                text=test_text_zh,
-                max_width=300,
-                font=font_path,
-                fontsize=30
-            )   
-            print(wrapped_text_zh, text_height_zh)
-            # verify chinese text is wrapped
-            self.assertIn("\n", wrapped_text_zh)
-        except Exception as e:
-            self.fail(f"test wrap_text failed: {str(e)}")
+        """英文长句必须按宽度换行。字体由解析器提供，仓库自带字体即可覆盖。"""
+        font_path = utils.resolve_font_path()
+
+        test_text_en = (
+            "This is a test text for wrapping long sentences in english language"
+        )
+        wrapped_text_en, text_height_en = vd.wrap_text(
+            text=test_text_en, max_width=300, font=font_path, fontsize=30
+        )
+        self.assertIn("\n", wrapped_text_en)
+        self.assertGreater(text_height_en, 0)
+
+    def test_wrap_text_chinese(self):
+        """
+        中文按字符换行需要带中文字形的字体。STHeiti、微软雅黑属于系统私有
+        字体，仓库按授权要求不分发，因此环境里没有可用中文字体时跳过，
+        而不是让干净克隆的仓库出现必然失败的用例。
+        """
+        font_path = _find_chinese_font()
+        if font_path is None:
+            self.skipTest("no font with Chinese glyphs is available in resource/fonts")
+
+        test_text_zh = "这是一段用来测试中文长句换行的文本内容，应该会根据宽度限制进行换行处理"
+        wrapped_text_zh, text_height_zh = vd.wrap_text(
+            text=test_text_zh, max_width=300, font=font_path, fontsize=30
+        )
+        self.assertIn("\n", wrapped_text_zh)
+        self.assertGreater(text_height_zh, 0)
 
     def test_rounded_subtitle_background_clip_has_transparent_corners(self):
         """
