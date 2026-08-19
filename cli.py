@@ -168,6 +168,41 @@ Output and exit status:
         formatter_class=_CliHelpFormatter,
     )
 
+    mode_group = parser.add_argument_group("generation mode")
+    mode_group.add_argument(
+        "--mode",
+        default=None,
+        choices=["stock", "drama"],
+        help=(
+            "how the video is produced: 'stock' writes narration and pairs it with "
+            "stock footage; 'drama' writes a structured character script and "
+            "generates each shot (default: stock)"
+        ),
+    )
+    mode_group.add_argument(
+        "--series-id",
+        default=None,
+        help="drama mode: the series to add an episode to, from storage/series",
+    )
+    mode_group.add_argument(
+        "--episode-premise",
+        default=None,
+        help=(
+            "drama mode: what happens in this episode; falls back to "
+            "--video-subject when omitted"
+        ),
+    )
+    mode_group.add_argument(
+        "--finale",
+        dest="is_finale",
+        default=None,
+        action=argparse.BooleanOptionalAction,
+        help=(
+            "drama mode: resolve the story instead of ending on a cliffhanger "
+            "(default: disabled)"
+        ),
+    )
+
     content_group = parser.add_argument_group("script and content")
     content_group.add_argument(
         "--video-subject",
@@ -448,8 +483,33 @@ Output and exit status:
     )
     args = parser.parse_args(argv)
 
-    if not args.video_subject.strip() and not args.video_script.strip():
+    drama_mode = args.mode == "drama"
+
+    # drama 模式用剧集梗概代替选题，因此它同样可以满足"必须有内容输入"的要求。
+    if (
+        not args.video_subject.strip()
+        and not args.video_script.strip()
+        and not (drama_mode and (args.episode_premise or "").strip())
+    ):
+        if drama_mode:
+            parser.error(
+                "one of --episode-premise or --video-subject is required in drama mode"
+            )
         parser.error("one of --video-subject or --video-script is required")
+
+    if drama_mode and not (args.series_id or "").strip():
+        parser.error("--series-id is required in drama mode")
+
+    # 这些开关只影响素材库流程，在 drama 模式下静默忽略会让用户误以为生效。
+    drama_only_conflicts = [
+        ("--series-id", args.series_id),
+        ("--episode-premise", args.episode_premise),
+        ("--finale", args.is_finale),
+    ]
+    if not drama_mode:
+        for flag, value in drama_only_conflicts:
+            if value not in (None, ""):
+                parser.error(f"{flag} requires --mode drama")
 
     if args.video_source == "local" and args.stop_at == "terms":
         parser.error(
@@ -547,6 +607,10 @@ def build_video_params(args: argparse.Namespace) -> VideoParams:
         "bgm_file",
         "bgm_volume",
         "sonilo_bgm_prompt",
+        "mode",
+        "series_id",
+        "episode_premise",
+        "is_finale",
         "font_name",
         "subtitle_position",
         "custom_position",

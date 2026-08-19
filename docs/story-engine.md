@@ -97,6 +97,41 @@ half-written file that makes the series unloadable.
 Reference paths are stored relative to the storage root so the directory can be
 moved or mounted into a container without breaking.
 
+## Choosing a mode
+
+The two production paths are selected with `VideoParams.mode`, which defaults to
+`stock` so every existing caller is unaffected:
+
+| Mode | Procedure |
+|---|---|
+| `stock` | LLM writes narration → keywords → stock clips from Pexels/Pixabay → TTS → subtitles → concat. Clip order does not matter. |
+| `drama` | Story engine writes a structured episode → per-shot stills conditioned on the cast's reference images → animate each still → TTS → captions. Shot order is the story. |
+
+From the command line:
+
+```bash
+# stock — unchanged, still the default
+python cli.py --video-subject "How AI helps developers daily"
+
+# drama — writes Part N of a series and stops at the script for review
+python cli.py --mode drama \
+  --series-id fruit-court \
+  --episode-premise "A disputed receipt turns into a shouting match" \
+  --stop-at script
+
+# drama — final part, resolves instead of ending on a cliffhanger
+python cli.py --mode drama --series-id fruit-court \
+  --episode-premise "The signature is examined" --finale
+```
+
+`--series-id`, `--episode-premise` and `--finale` are rejected outside drama mode
+rather than silently ignored, so a flag that cannot take effect fails loudly.
+
+Drama mode currently runs to the end of the script stage and then stops with a
+clear error, because no visual backend is wired in yet. It never falls back to
+stock footage: a character drama backed by unrelated stock clips is a different
+video, not a degraded one.
+
 ## Usage
 
 ```python

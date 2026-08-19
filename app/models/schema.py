@@ -31,6 +31,21 @@ class VideoTransitionMode(str, Enum):
     zoom_out = "ZoomOut"
 
 
+class VideoMode(str, Enum):
+    """
+    短视频的生成方式。两种模式的产线结构完全不同，因此显式建模而不是靠
+    ``video_source`` 隐式区分。
+
+    * ``stock``：既有流程。大模型写旁白，再按关键词去 Pexels/Pixabay 等
+      素材库检索空镜拼接。镜头之间没有连续性，顺序可以打乱。
+    * ``drama``：角色短剧流程。先用故事引擎写出结构化剧本，再按镜头逐个
+      生成画面，角色跨镜头保持一致，镜头必须按叙事顺序播放。
+    """
+
+    stock = "stock"
+    drama = "drama"
+
+
 class VideoAspect(str, Enum):
     landscape = "16:9"
     portrait = "9:16"
@@ -87,6 +102,13 @@ class VideoParams(BaseModel):
     match_materials_to_script: bool = False
     video_count: int = Field(default=1, ge=1)
 
+    # 生成方式。默认保持既有素材库流程，历史任务和现有 API 请求不受影响。
+    mode: VideoMode = VideoMode.stock
+    # 以下字段仅在 drama 模式下使用。
+    series_id: Optional[str] = None
+    episode_premise: str = Field(default="", max_length=2000)
+    is_finale: bool = False
+
     video_source: Optional[str] = "pexels"
     video_materials: Optional[List[MaterialInfo]] = (
         None  # Materials used to generate the video
@@ -109,7 +131,10 @@ class VideoParams(BaseModel):
     subtitle_enabled: Optional[bool] = True
     subtitle_position: Optional[str] = config.ui.get("subtitle_position", "bottom")  # top, bottom, center, custom
     custom_position: float = config.ui.get("custom_position", 70.0)
-    font_name: Optional[str] = "STHeitiMedium.ttc"
+    # 留空表示交给 utils.resolve_font_path() 选择：优先用户自备的中文字体，
+    # 否则回退到随仓库分发的开源字体。历史默认值指向仓库不分发的系统私有
+    # 字体，全新环境里会直接导致字幕渲染失败。
+    font_name: Optional[str] = ""
     text_fore_color: Optional[str] = "#FFFFFF"
     text_background_color: Union[bool, str] = False
     rounded_subtitle_background: bool = False
@@ -133,7 +158,10 @@ class SubtitleRequest(BaseModel):
     bgm_file: Optional[str] = ""
     bgm_volume: Optional[float] = 0.2
     subtitle_position: Optional[str] = config.ui.get("subtitle_position", "bottom")
-    font_name: Optional[str] = "STHeitiMedium.ttc"
+    # 留空表示交给 utils.resolve_font_path() 选择：优先用户自备的中文字体，
+    # 否则回退到随仓库分发的开源字体。历史默认值指向仓库不分发的系统私有
+    # 字体，全新环境里会直接导致字幕渲染失败。
+    font_name: Optional[str] = ""
     text_fore_color: Optional[str] = "#FFFFFF"
     text_background_color: Union[bool, str] = False
     rounded_subtitle_background: bool = False
