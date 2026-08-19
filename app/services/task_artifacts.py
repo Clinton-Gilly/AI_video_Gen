@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -19,41 +17,8 @@ def _script_file(task_id: str) -> Path:
 
 
 def _write_json_atomic(target: Path, payload: Mapping[str, Any]) -> None:
-    """
-    在目标目录内原子写入 JSON，避免进程中断留下半个文件。
-
-    临时文件和目标文件必须位于同一目录，才能保证 ``os.replace`` 在常见
-    本地文件系统和 Docker 挂载目录中保持原子替换语义。写入成功前不会修改
-    现有文件；异常时只清理本次创建的临时文件，并把错误交给调用方决定是否
-    影响主流程。
-    """
-    temp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=target.parent,
-            prefix=f".{target.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temp_file:
-            temp_path = Path(temp_file.name)
-            json.dump(
-                payload,
-                temp_file,
-                ensure_ascii=False,
-                indent=4,
-                default=lambda value: value.__dict__,
-            )
-            temp_file.write("\n")
-            temp_file.flush()
-            os.fsync(temp_file.fileno())
-
-        os.replace(temp_path, target)
-        temp_path = None
-    finally:
-        if temp_path is not None:
-            temp_path.unlink(missing_ok=True)
+    """原子写入任务清单，实现与剧集、角色档案共享同一份落盘语义。"""
+    utils.write_json_atomic(target, payload)
 
 
 def write_script_data(task_id: str, payload: Mapping[str, Any]) -> None:
