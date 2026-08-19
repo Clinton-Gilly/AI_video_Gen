@@ -190,11 +190,17 @@ def register_reference_image(
 
 
 def reference_image_path(series: Series, character_id: str) -> Optional[Path]:
-    """把角色档案里的相对路径还原成可读取的绝对路径。"""
+    """
+    把角色档案里的相对路径还原成可读取的绝对路径。
+
+    基准目录必须与 ``register_reference_image`` 写入时使用的完全一致，否则
+    登记成功的参考图在读取时解析不到，画面层会当成"该角色没有定妆图"而
+    退化成纯文本提示词——角色会逐镜换脸，而且不会有任何报错。
+    """
     character = series.character(character_id)
     if character is None or not character.has_reference():
         return None
-    resolved = Path(utils.storage_dir()).parent / character.reference_image
+    resolved = series_root().parent / character.reference_image
     return resolved if resolved.is_file() else None
 
 

@@ -169,7 +169,8 @@ class TestDramaPipeline(unittest.TestCase):
 
         materials.assert_not_called()
         self.assertEqual(self.states["t1"]["state"], TASK_STATE_FAILED)
-        self.assertIn("no visual backend", result["error"])
+        # 没有配置画面后端时报告的是后端缺失，而不是悄悄改用素材库空镜。
+        self.assertIn("not configured", result["error"])
 
     def test_episode_premise_takes_precedence_over_the_subject(self):
         series_store.save_series(_series())

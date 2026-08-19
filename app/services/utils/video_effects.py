@@ -1,5 +1,5 @@
 import numpy as np
-from moviepy import Clip, ColorClip, CompositeVideoClip, vfx
+from moviepy import Clip, ColorClip, CompositeVideoClip, ImageClip, vfx
 from PIL import Image
 
 
@@ -143,3 +143,58 @@ def zoomout_transition(clip: Clip, t: float) -> Clip:
         return _zoom_frame(get_frame(current_time), scale_factor)
 
     return clip.transform(scale_effect)
+
+
+def ken_burns_clip(
+    image_path: str,
+    duration: float,
+    camera_move: str = "slow_push_in",
+    resolution: tuple[int, int] | None = None,
+) -> Clip:
+    """
+    用缓慢的推拉或平移，把一张静帧变成一个有运动感的镜头。
+
+    角色短剧里绝大多数镜头不值得调用按秒计费的图生视频模型：竖屏信息流中,
+    一个静止的对话特写配上缓慢推镜，观众分辨不出它没有真正动过。这里提供的
+    就是那条免费路径，与 planner 的取舍直接对应。
+
+    幅度刻意压得很小（放大到 1.08 倍）。幅度一大，静帧的透视错误会被放大成
+    明显的"纸片平移"，反而比不动更假。
+    """
+    if duration <= 0:
+        raise ValueError("duration must be positive")
+
+    clip = ImageClip(image_path).with_duration(duration)
+    if resolution:
+        clip = clip.resized(new_size=resolution)
+
+    zoom_span = 0.08
+    pan_span = 0.06
+
+    if camera_move in ("slow_push_in", "slow_pull_out"):
+        def scale(t: float) -> float:
+            progress = min(max(t / duration, 0.0), 1.0)
+            if camera_move == "slow_push_in":
+                return 1.0 + zoom_span * progress
+            return 1.0 + zoom_span * (1.0 - progress)
+
+        return clip.resized(scale)
+
+    if camera_move in ("pan_left", "pan_right"):
+        # 平移必须先放大，否则移出画面的部分会露出黑边。
+        width, height = clip.size
+        zoomed = clip.resized(1.0 + pan_span)
+        offset = int(width * pan_span)
+
+        def position(t: float):
+            progress = min(max(t / duration, 0.0), 1.0)
+            shift = offset * (progress if camera_move == "pan_left" else 1.0 - progress)
+            return (-shift, 0)
+
+        return CompositeVideoClip(
+            [zoomed.with_position(position)], size=(width, height)
+        ).with_duration(duration)
+
+    # static 和 handheld 都退回静止：手持抖动无法由静帧可信地伪造，
+    # 剧本要求手持时应当交给 planner 选中它做真实运动。
+    return clip

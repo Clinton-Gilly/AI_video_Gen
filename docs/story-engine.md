@@ -173,15 +173,55 @@ does not block script generation on missing reference images — writing a scrip
 costs a fraction of what generating frames costs, so the check belongs at the
 render entry point.
 
+## Visual backends
+
+`app/services/visual/` turns the script into per-shot assets. Two protocols,
+registered by name in `visual/__init__.py`, so adding a vendor is one line:
+
+| Protocol | Default | Job |
+|---|---|---|
+| `StillProvider` | `gemini` | one image per shot, conditioned on cast reference stills |
+| `MotionProvider` | `kling` | image-to-video, only for the shots the planner picks |
+
+Gemini is the still default because `google-genai` is already a dependency, and
+it reuses `gemini_api_key` from the LLM section — one account covers both.
+
+### The cost control
+
+Image-to-video bills per second and dominates the bill; stills are rounding
+error. So the lever that matters is **how many shots you animate**, not which
+model you buy.
+
+`planner.plan_episode()` scores every shot and spends a fixed budget
+(`max_animated_shots`, default 4) on the highest-value ones. Everything else
+renders as a still with a slow Ken Burns move, which costs nothing.
+
+Scoring favours what viewers actually notice: hook / turn / cliffhanger beats,
+close-ups, shots with dialogue (lip movement is where stills give themselves
+away), and handheld moves that Ken Burns physically cannot fake. Insert shots of
+static objects score lowest — they are the cheapest thing to leave still.
+
+At ~13 shots in a 45-second episode, animating 4 costs roughly a third of
+animating all of them. `planner.estimate_cost()` reports the difference against
+full motion so the budget is a number, not a guess. It takes prices as
+arguments — vendor pricing moves too fast to hardcode.
+
+Set `max_animated_shots = 0` to render stills only and spend nothing on video.
+
+### Generation order
+
+`generate_episode_visuals()` refuses to start when any character lacks a
+reference still, and refuses when the plan needs motion but no motion provider
+is configured — both checked *before* the first paid call, because discovering
+either halfway through means paying twice.
+
 ## Not yet built
 
 The engine stops at prompts. Still to come:
 
-- A visual provider interface (`generate_reference_image`, `generate_shot_still`,
-  `animate_still`) with a concrete image → animate backend behind it.
 - Per-character TTS routing — `Character.voice_name` is modelled but the audio
   stage still uses the single `VideoParams.voice_name`.
 - A drama caption renderer for `CaptionStyle.emphasis` and `title_card`, distinct
   from the existing narration subtitles.
-- A `video_source="story"` branch in `task.py` wiring this into the task pipeline
-  alongside `pexels` and `loomloom`.
+- Drama audio and assembly: shot visuals land in the task directory, but TTS,
+  captions and the final concat are not wired into the drama pipeline yet.
