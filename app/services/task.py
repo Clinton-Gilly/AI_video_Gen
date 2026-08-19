@@ -31,6 +31,7 @@ from app.services import upload_post
 from app.services import series as series_store
 from app.services import state as sm
 from app.services import story
+from app.services import visual
 from app.utils import file_security, utils
 
 
@@ -1254,11 +1255,46 @@ def _run_drama_pipeline(task_id, params: VideoParams, stop_at: str = "video"):
             f"different in every shot: {', '.join(missing)}",
         )
 
+    shots_dir = path.join(utils.task_dir(task_id), "shots")
+    try:
+        clips = visual.generate_episode_visuals(
+            series=series,
+            episode=episode,
+            output_dir=shots_dir,
+            max_animated_shots=int(
+                config.app.get("max_animated_shots", visual.DEFAULT_MAX_ANIMATED_SHOTS)
+            ),
+        )
+    except visual.VisualError as exc:
+        return _mark_task_failed(task_id, "materials", str(exc))
+
+    visuals_payload = {
+        "shots_dir": shots_dir,
+        "stills": [clip.still_path for clip in clips],
+        "animated_clips": [
+            clip.clip_path for clip in clips if clip.clip_path is not None
+        ],
+        "animated_shot_count": sum(1 for clip in clips if clip.animated),
+    }
+    task_artifacts.patch_script_data(task_id, **visuals_payload)
+    sm.state.update_task(
+        task_id, state=const.TASK_STATE_PROCESSING, progress=70, **visuals_payload
+    )
+
+    if stop_at == "materials":
+        payload = {**script_payload, **visuals_payload}
+        sm.state.update_task(
+            task_id, state=const.TASK_STATE_COMPLETE, progress=100, **payload
+        )
+        return payload
+
+    # 配音、字幕和成片装配还没有接入 drama 产线。画面已经落盘，重跑时可以
+    # 直接复用，因此这里明确停在装配前，而不是退回素材库空镜。
     return _mark_task_failed(
         task_id,
-        "materials",
-        f"episode {episode.part_number} written with {len(shots)} shots, but no "
-        "visual backend is configured for drama mode yet",
+        "video",
+        f"generated {len(clips)} shot visuals in {shots_dir}, but drama audio "
+        "and assembly are not wired up yet",
     )
 
 

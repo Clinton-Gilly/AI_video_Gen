@@ -132,6 +132,27 @@ class TestReferenceImages(SeriesStoreTestCase):
         )
         self.assertFalse(Path(character.reference_image).is_absolute())
 
+    def test_a_registered_reference_resolves_back_to_a_readable_file(self):
+        """
+        写入和读取必须用同一个基准目录。基准不一致时登记会成功但解析不到，
+        画面层只会当成"该角色没有定妆图"而静默退化，角色逐镜换脸且无报错。
+        """
+        series_store.save_series(_series())
+        series_store.register_reference_image(
+            "fruit-court", "berry", str(self._write_image())
+        )
+
+        series = series_store.load_series("fruit-court")
+        resolved = series_store.reference_image_path(series, "berry")
+        self.assertIsNotNone(resolved)
+        self.assertTrue(resolved.is_file())
+        self.assertEqual(resolved.read_bytes(), b"fake-png")
+
+    def test_reference_path_is_none_for_a_character_without_one(self):
+        series_store.save_series(_series())
+        series = series_store.load_series("fruit-court")
+        self.assertIsNone(series_store.reference_image_path(series, "mango"))
+
     def test_rejects_an_unsupported_image_type(self):
         series_store.save_series(_series())
         source = self.storage / "berry.txt"

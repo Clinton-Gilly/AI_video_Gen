@@ -79,6 +79,37 @@ twelvelabs_rerank_terms = false
 # twelvelabs_marengo_model = "marengo3.0"
 # twelvelabs_pegasus_model = "pegasus1.5"
 
+###############################################################################
+# Character drama mode (mode = "drama")
+#
+# Drama mode generates each shot instead of searching stock footage. Cost is
+# dominated by image-to-video, which bills per second, so the single most
+# effective control is max_animated_shots below — not picking a cheaper model.
+###############################################################################
+
+# Still image backend. Reuses gemini_api_key from the LLM section when
+# gemini_image_api_key is not set, so one Gemini account covers both.
+still_provider = "gemini"
+# gemini_image_api_key = ""
+# gemini_image_model = "gemini-3-pro-image-preview"
+
+# Image-to-video backend, used only for the shots the planner selects.
+motion_provider = "kling"
+# kling_api_key = ""
+# kling_base_url = "https://api.klingai.com"
+# kling_model = "kling-v2.6-pro"
+# "std" is cheaper than "pro" and is good enough for vertical short drama.
+# kling_mode = "std"
+# kling_timeout_seconds = 600
+# kling_poll_interval_seconds = 5
+
+# How many shots per episode get real image-to-video motion. Every other shot
+# renders as a still with a slow Ken Burns move, which costs nothing. At around
+# 13 shots per 45-second episode, 4 animated shots costs roughly a third of
+# animating everything, and viewers on a phone cannot tell the difference on
+# static dialogue shots. Set to 0 to render stills only.
+max_animated_shots = 4
+
 # Match search terms and downloaded materials to the script narrative order.
 # 默认关闭，开启后会减少随机性，使素材顺序更贴近文案结构。
 match_materials_to_script = false
