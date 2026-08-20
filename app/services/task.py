@@ -1295,13 +1295,60 @@ def _run_drama_pipeline(task_id, params: VideoParams, stop_at: str = "video"):
         )
         return payload
 
+    task_output_dir = utils.task_dir(task_id)
+    music_provider = _VIDEO_MUSIC_PROVIDERS.get(params.bgm_type)
+    music_requested = music_provider is not None and bgm_service.should_use_bgm(
+        params.bgm_type, params.bgm_volume
+    )
+    # 选了视频转音乐供应商时，明确禁用曲库回退：留 None 会让历史任务里残留的
+    # bgm_file 在供应商失败后悄悄顶上，用户以为拿到的是生成的配乐。
+    bgm_override = "" if music_provider else None
+    generation_warnings = []
+
     try:
+        if music_requested:
+            # 这类供应商是"看着成片写配乐"，必须先有画面。先出一版无配乐的
+            # 草稿供其观看，再用生成的音乐正式装配一次。
+            draft = drama_assembly.assemble_episode(
+                series=series,
+                episode=episode,
+                clips=clips,
+                output_dir=task_output_dir,
+                params=params,
+                bgm_file_override="",
+                output_name=f"episode-{episode.part_number:03d}-draft",
+            )
+            generated_bgm = path.join(
+                task_output_dir,
+                f"{params.bgm_type}-bgm{music_provider['suffix']}",
+            )
+            try:
+                music_provider["service"].generate_bgm(
+                    video_path=draft,
+                    output_path=generated_bgm,
+                    prompt=_get_video_music_prompt(params),
+                )
+                bgm_override = generated_bgm
+            except music_provider["error_type"] as exc:
+                logger.warning(
+                    f"{music_provider['display_name']} bgm failed, continuing "
+                    f"without music: {exc}"
+                )
+                generation_warnings.append(
+                    {
+                        "code": music_provider["warning_code"],
+                        "message": str(exc),
+                    }
+                )
+                bgm_override = ""
+
         final_video = drama_assembly.assemble_episode(
             series=series,
             episode=episode,
             clips=clips,
-            output_dir=utils.task_dir(task_id),
+            output_dir=task_output_dir,
             params=params,
+            bgm_file_override=bgm_override,
         )
     except (drama_assembly.DramaAssemblyError, OSError, ValueError) as exc:
         return _mark_task_failed(task_id, "video", str(exc))
@@ -1311,6 +1358,7 @@ def _run_drama_pipeline(task_id, params: VideoParams, stop_at: str = "video"):
         **visuals_payload,
         "videos": [final_video],
         "combined_videos": [final_video],
+        "warnings": generation_warnings or None,
     }
     task_artifacts.patch_script_data(task_id, videos=[final_video])
     sm.state.update_task(

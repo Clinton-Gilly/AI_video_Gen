@@ -21,13 +21,16 @@ from typing import List, Sequence
 from loguru import logger
 from moviepy import (
     AudioFileClip,
+    CompositeAudioClip,
     CompositeVideoClip,
     TextClip,
+    afx,
     concatenate_videoclips,
 )
 
 from app.models.schema import VideoAspect, VideoParams
 from app.models.story import CaptionStyle, Episode, Series, Shot
+from app.services import bgm as bgm_service
 from app.services import video as video_service
 from app.services import voice as voice_service
 from app.services.utils.video_effects import ken_burns_clip
@@ -238,12 +241,31 @@ def build_caption_clip(
     return caption.with_position(("center", int(height * vertical)))
 
 
+def resolve_bgm_file(params: VideoParams, bgm_file_override: str | None) -> str:
+    """
+    决定这一集用哪段配乐。
+
+    ``bgm_file_override`` 由任务层传入，表示配乐已由视频转音乐供应商按成片
+    时长生成好；传入空串表示明确不要配乐。为 ``None`` 时才回退到内置随机
+    曲库或用户上传的文件。
+    """
+    if bgm_file_override is not None:
+        return bgm_file_override
+    if not bgm_service.should_use_bgm(params.bgm_type, params.bgm_volume):
+        return ""
+    return video_service.get_bgm_file(
+        bgm_type=params.bgm_type, bgm_file=params.bgm_file
+    )
+
+
 def assemble_episode(
     series: Series,
     episode: Episode,
     clips: Sequence[ClipResult],
     output_dir: str,
     params: VideoParams,
+    bgm_file_override: str | None = None,
+    output_name: str = "",
 ) -> str:
     """
     把画面、配音和字幕装配成一支成片，返回输出路径。
@@ -293,9 +315,33 @@ def assemble_episode(
             f"duration={sum(clip.duration for clip in rendered):.1f}s"
         )
         timeline = concatenate_videoclips(rendered, method="compose")
-        output_file = os.path.join(
-            output_dir, f"episode-{episode.part_number:03d}.mp4"
-        )
+        opened.append(timeline)
+
+        bgm_file = resolve_bgm_file(params, bgm_file_override)
+        if bgm_file:
+            try:
+                effects = [
+                    afx.MultiplyVolume(params.bgm_volume),
+                    afx.AudioFadeOut(3),
+                ]
+                # 曲库里的歌通常比一集短，需要循环铺满；供应商按成片时长
+                # 生成的配乐已经等长，再循环反而会在结尾多出一段。
+                if bgm_file_override is None:
+                    effects.append(afx.AudioLoop(duration=timeline.duration))
+                music = AudioFileClip(bgm_file)
+                opened.append(music)
+                mixed = [music.with_effects(effects)]
+                if timeline.audio is not None:
+                    mixed.insert(0, timeline.audio)
+                timeline = timeline.with_audio(CompositeAudioClip(mixed))
+                logger.info(f"mixed background music: {os.path.basename(bgm_file)}")
+            except Exception:
+                # 配乐是锦上添花，混音失败不应当让整集白生成。记录完整堆栈
+                # 供排查，成片继续按纯人声输出。
+                logger.exception(f"failed to mix background music: {bgm_file}")
+
+        name = output_name or f"episode-{episode.part_number:03d}"
+        output_file = os.path.join(output_dir, f"{name}.mp4")
         video_service._write_videofile_with_codec_fallback(
             timeline,
             output_file,
@@ -305,7 +351,6 @@ def assemble_episode(
             threads=params.n_threads or 2,
             logger=None,
         )
-        opened.append(timeline)
     finally:
         # 未关闭的 MoviePy 剪辑会持有文件句柄，Windows 上会让后续删除任务
         # 目录直接失败，因此无论成功与否都要收干净。
