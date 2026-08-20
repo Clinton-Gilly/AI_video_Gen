@@ -215,13 +215,51 @@ reference still, and refuses when the plan needs motion but no motion provider
 is configured — both checked *before* the first paid call, because discovering
 either halfway through means paying twice.
 
+## Assembly
+
+`app/services/drama_assembly.py` turns shot visuals into a finished MP4. Three
+things differ from stock-footage assembly:
+
+**Audio decides shot length, not the script.** `Shot.duration` is a writing-time
+estimate; the real length is however long the line takes to say. Cutting to the
+script truncates dialogue, so every shot is stretched to its synthesized audio.
+An animated clip that runs short is extended by freezing its last frame —
+looping would show a visible jump back, worst of all on a talking shot.
+
+**Every character speaks in their own voice.** `Character.voice_name` is read
+here for the first time: dialogue uses the speaker's voice, narration uses the
+series narrator, and a character with no voice set falls back to the narrator.
+This is what makes a multi-character scene sound like a conversation instead of
+one person reading a script.
+
+**Captions are drama captions.** `CaptionStyle` drives size and position:
+emphasis and title cards are larger and higher up; narration and dialogue sit in
+the lower third, clear of faces. Emphasis captions are upper-cased, because that
+is what the format looks like.
+
+A single shot whose TTS fails degrades to a silent shot rather than failing the
+episode — losing one line is much cheaper than losing the render.
+
+## The Web UI
+
+`webui/pages/2_Character_Drama.py` is a separate Streamlit page, deliberately
+not part of `webui/Main.py`: that file is close to five thousand lines of
+stock-footage controls, and the two pipelines share almost no widgets.
+
+Three tabs follow the order of work: **Series** (create the bible and cast),
+**Cast** (generate reference stills, assign a voice per character), **Episode**
+(write Part N, choose the animation budget, watch the result). The sidebar
+reports which backends are actually configured, and the episode tab can stop
+after `script` so you can read what was written before spending anything on
+images.
+
+Run it with `webui.sh` / `webui.bat` as before, then pick **Character Drama**
+from the page list.
+
 ## Not yet built
 
-The engine stops at prompts. Still to come:
+Still to come:
 
-- Per-character TTS routing — `Character.voice_name` is modelled but the audio
-  stage still uses the single `VideoParams.voice_name`.
-- A drama caption renderer for `CaptionStyle.emphasis` and `title_card`, distinct
-  from the existing narration subtitles.
-- Drama audio and assembly: shot visuals land in the task directory, but TTS,
-  captions and the final concat are not wired into the drama pipeline yet.
+- Background music for drama episodes: the stock pipeline's video-to-music
+  providers are not wired into drama assembly yet.
+- Auto-publishing drama episodes through `upload_post`.
