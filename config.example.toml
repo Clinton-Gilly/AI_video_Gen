@@ -110,6 +110,12 @@ motion_provider = "kling"
 # static dialogue shots. Set to 0 to render stills only.
 max_animated_shots = 4
 
+# Background music for drama episodes uses the same bgm_type as stock videos:
+# "random" or an uploaded file needs no key; "sonilo" or "elevenlabs" watches
+# the finished episode and scores it, which costs one extra encode. If a
+# generative provider fails the episode ships silent rather than quietly
+# substituting a library track.
+
 # Match search terms and downloaded materials to the script narrative order.
 # 默认关闭，开启后会减少随机性，使素材顺序更贴近文案结构。
 match_materials_to_script = false

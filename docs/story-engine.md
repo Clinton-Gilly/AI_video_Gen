@@ -256,10 +256,51 @@ images.
 Run it with `webui.sh` / `webui.bat` as before, then pick **Character Drama**
 from the page list.
 
+## Background music
+
+Drama episodes take music the same three ways stock videos do:
+
+| `bgm_type` | Behaviour |
+|---|---|
+| `random` / a file | Track from the built-in library or your upload, looped to episode length and faded out. No API key. |
+| `sonilo` / `elevenlabs` | The provider watches the finished episode and scores it. |
+
+The generative providers need a video to watch, so drama assembles twice: once
+into a draft with no music, then again with the generated track. That costs an
+extra encode and is only paid when a generative provider is selected.
+
+If a generative provider fails, the episode ships **silent rather than falling
+back to the song library**, and the failure is recorded in the task's
+`warnings`. A silent fallback would leave you believing you were listening to
+music written for that episode.
+
+## Connections page
+
+`webui/pages/3_Connections.py` collects every provider key in one place and
+tests it on demand — previously the only way to find out whether a key worked
+was to run a job and have it fail partway through, after spending on the stages
+that came first.
+
+Every probe is free by construction:
+
+| Provider | Probe |
+|---|---|
+| LLM (all of them — OpenAI, Qwen, Gemini, Ollama, Moonshot, DeepSeek…) | A two-word completion. The only check that covers key, base URL, model name and balance at once. |
+| Gemini stills | Lists models. Generating an image would bill a request. |
+| Kling motion | Queries a task id that cannot exist. A "not found" reply proves the key authenticated; submitting a real job bills per second. |
+| Sonilo / ElevenLabs | Their free account endpoints. |
+| Pexels / Pixabay | A one-item read query. |
+
+Failures report the actual reason — key not set, key rejected, rate limited,
+provider down, DNS failure — because "connection failed" tells you nothing about
+what to do next. Rate limiting is deliberately not reported as a bad key: the
+key works, it is just throttled.
+
+The **Test everything** tab skips providers with no key rather than reporting
+them as failures, so one real error is not lost in a wall of red.
+
 ## Not yet built
 
 Still to come:
 
-- Background music for drama episodes: the stock pipeline's video-to-music
-  providers are not wired into drama assembly yet.
 - Auto-publishing drama episodes through `upload_post`.

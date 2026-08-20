@@ -232,6 +232,44 @@ class TestShotVisualFitting(unittest.TestCase):
         self.assertAlmostEqual(clip.duration, 3.0, places=2)
 
 
+class TestBackgroundMusic(unittest.TestCase):
+    def setUp(self):
+        self.params = VideoParams(video_subject="x", bgm_type="random", bgm_volume=0.2)
+
+    def test_a_provider_generated_track_is_used_verbatim(self):
+        """供应商按成片时长生成的配乐已经等长，不该再走曲库解析。"""
+        with patch("app.services.video.get_bgm_file") as library:
+            resolved = drama_assembly.resolve_bgm_file(
+                self.params, bgm_file_override="/tmp/generated.mp3"
+            )
+        library.assert_not_called()
+        self.assertEqual(resolved, "/tmp/generated.mp3")
+
+    def test_an_empty_override_means_no_music_at_all(self):
+        """
+        选了视频转音乐供应商但生成失败时，不能让曲库悄悄顶上——用户会以为
+        听到的是为这一集生成的配乐。
+        """
+        with patch("app.services.video.get_bgm_file") as library:
+            resolved = drama_assembly.resolve_bgm_file(self.params, bgm_file_override="")
+        library.assert_not_called()
+        self.assertEqual(resolved, "")
+
+    def test_no_override_falls_back_to_the_song_library(self):
+        with patch(
+            "app.services.video.get_bgm_file", return_value="/songs/a.mp3"
+        ) as library:
+            resolved = drama_assembly.resolve_bgm_file(self.params, bgm_file_override=None)
+        library.assert_called_once()
+        self.assertEqual(resolved, "/songs/a.mp3")
+
+    def test_zero_volume_disables_music(self):
+        params = VideoParams(video_subject="x", bgm_type="random", bgm_volume=0.0)
+        with patch("app.services.video.get_bgm_file") as library:
+            self.assertEqual(drama_assembly.resolve_bgm_file(params, None), "")
+        library.assert_not_called()
+
+
 class TestAssembleEpisode(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
