@@ -108,6 +108,9 @@ class VideoParams(BaseModel):
     series_id: Optional[str] = None
     episode_premise: str = Field(default="", max_length=2000)
     is_finale: bool = False
+    # 单集里真正调用图生视频的镜头数，是画面成本的主要控制点。留空表示
+    # 沿用配置默认值；设为 0 表示整集只出静帧，不花视频钱。
+    max_animated_shots: Optional[int] = Field(default=None, ge=0)
 
     video_source: Optional[str] = "pexels"
     video_materials: Optional[List[MaterialInfo]] = (

@@ -30,6 +30,7 @@ from app.services import (
 from app.services import upload_post
 from app.services import series as series_store
 from app.services import state as sm
+from app.services import drama_assembly
 from app.services import story
 from app.services import visual
 from app.utils import file_security, utils
@@ -1261,8 +1262,14 @@ def _run_drama_pipeline(task_id, params: VideoParams, stop_at: str = "video"):
             series=series,
             episode=episode,
             output_dir=shots_dir,
-            max_animated_shots=int(
-                config.app.get("max_animated_shots", visual.DEFAULT_MAX_ANIMATED_SHOTS)
+            max_animated_shots=(
+                params.max_animated_shots
+                if params.max_animated_shots is not None
+                else int(
+                    config.app.get(
+                        "max_animated_shots", visual.DEFAULT_MAX_ANIMATED_SHOTS
+                    )
+                )
             ),
         )
     except visual.VisualError as exc:
@@ -1288,14 +1295,29 @@ def _run_drama_pipeline(task_id, params: VideoParams, stop_at: str = "video"):
         )
         return payload
 
-    # 配音、字幕和成片装配还没有接入 drama 产线。画面已经落盘，重跑时可以
-    # 直接复用，因此这里明确停在装配前，而不是退回素材库空镜。
-    return _mark_task_failed(
-        task_id,
-        "video",
-        f"generated {len(clips)} shot visuals in {shots_dir}, but drama audio "
-        "and assembly are not wired up yet",
+    try:
+        final_video = drama_assembly.assemble_episode(
+            series=series,
+            episode=episode,
+            clips=clips,
+            output_dir=utils.task_dir(task_id),
+            params=params,
+        )
+    except (drama_assembly.DramaAssemblyError, OSError, ValueError) as exc:
+        return _mark_task_failed(task_id, "video", str(exc))
+
+    final_payload = {
+        **script_payload,
+        **visuals_payload,
+        "videos": [final_video],
+        "combined_videos": [final_video],
+    }
+    task_artifacts.patch_script_data(task_id, videos=[final_video])
+    sm.state.update_task(
+        task_id, state=const.TASK_STATE_COMPLETE, progress=100, **final_payload
     )
+    logger.success(f"drama task finished: {task_id}, video: {final_video}")
+    return final_payload
 
 
 def _run_stock_pipeline(
